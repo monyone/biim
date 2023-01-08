@@ -6,6 +6,7 @@ from aiohttp import web
 import argparse
 import sys
 import os
+import time
 
 from collections import deque
 
@@ -181,6 +182,8 @@ async def main():
 
   PCR_PID = None
   LATEST_PCR_VALUE = None
+  LATEST_PCR_MONOTONIC_TIME = None
+  LATEST_PCR_SLEEP_DIFFERENCE = 0
   LATEST_PCR_TIMESTAMP_90KHZ = 0
 
   PMT_PID = None
@@ -477,8 +480,16 @@ async def main():
     if PID == PCR_PID and ts.has_pcr(packet):
       PCR_VALUE = (ts.pcr(packet) - ts.HZ + ts.PCR_CYCLE) % ts.PCR_CYCLE
       if LATEST_PCR_VALUE is not None:
-        LATEST_PCR_TIMESTAMP_90KHZ += (PCR_VALUE - LATEST_PCR_VALUE + ts.PCR_CYCLE) % ts.PCR_CYCLE
+        PCR_DIFF = (PCR_VALUE - LATEST_PCR_VALUE + ts.PCR_CYCLE) % ts.PCR_CYCLE
+        TIME_DIFF = (time.monotonic() - LATEST_PCR_MONOTONIC_TIME)
+        LATEST_PCR_TIMESTAMP_90KHZ += PCR_DIFF
+        if args.input is not sys.stdin.buffer:
+          SLEEP_BEGIN = time.monotonic()
+          await asyncio.sleep(max(0, PCR_DIFF / ts.HZ - (TIME_DIFF + LATEST_PCR_SLEEP_DIFFERENCE)))
+          SLEEP_END = time.monotonic()
+          LATEST_PCR_SLEEP_DIFFERENCE = (SLEEP_END - SLEEP_BEGIN) - max(0, PCR_DIFF / ts.HZ - (TIME_DIFF + LATEST_PCR_SLEEP_DIFFERENCE))
       LATEST_PCR_VALUE = PCR_VALUE
+      LATEST_PCR_MONOTONIC_TIME = time.monotonic()
 
 if __name__ == '__main__':
   asyncio.run(main())
